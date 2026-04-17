@@ -859,6 +859,23 @@ function init() {
   firebase.initializeApp(FIREBASE_CONFIG);
   db = firebase.database();
   auth = firebase.auth();
+
+  // Handle redirect result (fires when user returns from Google sign-in redirect)
+  auth.getRedirectResult().then(result => {
+    // If redirect sign-in succeeded, onAuthStateChanged below handles it
+    // No extra action needed here
+  }).catch(err => {
+    if (err && err.code && 
+        err.code !== 'auth/no-current-user' &&
+        err.code !== 'auth/null-user') {
+      // Show error only for real failures, not for "no redirect was in progress"
+      G('app').style.display = 'flex';
+      showPage('login');
+      setTimeout(() => {
+        SA('login-error','rd','Sign-in error: ' + (err.message || err.code));
+      }, 500);
+    }
+  });
   // No redirect sign-in used — popup only (avoids sessionStorage partitioning issues)
 
   const urlCode = new URLSearchParams(window.location.search).get('code');
@@ -1015,14 +1032,17 @@ function showUserMenu() {
 function signIn() {
   const p = new firebase.auth.GoogleAuthProvider();
   p.setCustomParameters({ prompt: 'select_account' });
+  // Try popup first; if it fails for any reason, fall back to redirect
   auth.signInWithPopup(p).catch(err => {
-    if (err.code === 'auth/popup-blocked') {
-      SA('login-error','rd','Popup was blocked. Please allow popups for this site in your browser, then try again.<br><br><b>Chrome:</b> Click the popup-blocked icon in the address bar → Always allow.');
-    } else if (err.code === 'auth/popup-closed-by-user') {
-      // user closed it — do nothing
-    } else {
-      SA('login-error','rd','Sign-in failed: ' + (err.message || err.code));
+    if (err.code === 'auth/popup-closed-by-user' ||
+        err.code === 'auth/cancelled-popup-request') {
+      return; // user closed it — ignore
     }
+    // Popup failed (blocked, unauthorized domain in popup, etc.)
+    // Fall back to redirect which works on all hosting platforms
+    auth.signInWithRedirect(p).catch(err2 => {
+      SA('login-error','rd','Sign-in failed: ' + (err2.message || err2.code));
+    });
   });
 }
 
